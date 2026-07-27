@@ -1,12 +1,125 @@
 package com.madgag.algo.packing.binpacking
 
 import com.madgag.algo.packing.binpacking.BinPacking.ActiveBin.Selector
+import com.madgag.algo.packing.binpacking.BinPacking.ActiveBin.Selector.{BestFit, FirstFit}
+import com.madgag.scala.collection.decorators._
 
 import scala.collection.immutable.SortedMap
 import scala.collection.mutable
 
+/**
+ * We want a way to track arbitary objects and ultimately assign them to a bin.
+ *
+ * However, when we're busy bin-packing, we don't really care about those objects
+ * identity - we just care about their size. Objects of the same size are
+ * fungible as far as bin-packing is concerned.
+ */
 object BinPacking {
+
+  trait RichColl[T, I, O] {
+    val input: I
+
+    def packWith(packer: Packer[T]): O = {
+      val census = itemsBySize(packer.setup.sizer)
+      val packing: Packing = packer.pack(census.mapV(_.totalItems))
+      outputFor(packing, census)
+    }
+
+    protected def itemsBySize(sizer: T => Int): Census[T]
+    protected def outputFor(packing: Packing, census: Census[T]): O
+  }
+
+  case class Acc[T](census: Census[T], finishedBins: Set[Set[T]], currentBin: Set[T]) {
+    def add(binContents: BinContents): Acc[T] = binContents.foldLeft(this) {
+      case (acc, (item, quantity)) => acc.addToExistingBin(item, quantity)
+    }.finishBin
+
+    def addToExistingBin(itemSize: Int, quantity: Int): Acc[T] = {
+      val (extracted, updatedCensus) = census.removeItems(itemSize, quantity)
+      copy(
+        census = updatedCensus,
+        currentBin = currentBin ++ extracted.keySet // we expect no repeats for Set
+      )
+    }
+
+    def finishBin: Acc[T] = copy(finishedBins = finishedBins + currentBin, currentBin = Set.empty)
+  }
+
+  implicit class RichSet[T](val input: Set[T]) extends RichColl[T, Set[T], Set[Set[T]]] {
+
+    override protected def itemsBySize(sizer: T => Int): Census[T] =
+      input.groupUp(sizer)(_.map(_ -> 1).toMap)
+
+    override protected def outputFor(packing: Packing, census: Census[T]): Set[Set[T]] =
+      (for {
+        (bc, repsOfBin) <- packing
+        _ <- 0 until repsOfBin
+      } yield bc).foldLeft(Acc[T](census, Set.empty, Set.empty))(_ add _).finishedBins
+
+  }
+
+  case class Setup[A](binCapacity: Int, sizer: A => Int) {
+    def using(offlineAlgorithm: OfflineAlgorithm) = Packer(this, offlineAlgorithm)
+  }
+
+  trait OfflineAlgorithm {
+    def pack(binCapacity: Int, itemQuantities: FreqMap[Int]): Packing
+  }
+
+  object OfflineAlgorithm {
+    val FFD: OfflineAlgorithm = FirstFit.Decreasing
+    val BFD: OfflineAlgorithm = BestFit.Decreasing
+  }
+
+
+
+  case class Packer[A](setup: Setup[A], offlineAlgorithm: OfflineAlgorithm) {
+
+    def pack(bareItemFrequenciesBySize: FreqMap[Int]): Packing =
+      offlineAlgorithm.pack(setup.binCapacity, bareItemFrequenciesBySize)
+
+//    /**
+//     * For packing when you don't want to repeat any items, which would be normal
+//     * when you're making API calls about many ids -  no point in asking about the
+//     * same item twice.
+//     */
+//    def pack(items: Set[A]): Set[Set[A]] = ???
+  }
+
+  type Census[A] = Map[Int, FreqMap[A]]
+
+  object Census {
+    def apply[A](items: Seq[A], f: A => Int): Census[A] = FreqMap(items).groupBy(x => f(x._1))
+  }
+
+  implicit class RichCensus[T](census: Census[T]) {
+    def removeItems(itemSize: Int, quantity: Int): (FreqMap[T], Census[T]) = {
+      val (extracted, remaining) = census(itemSize).removeItems(quantity)
+      (extracted, if (remaining.isEmpty) census.removed(itemSize) else census.updated(itemSize, remaining))
+    }
+  }
+
   type FreqMap[A] = Map[A, Int]
+
+  implicit class RichFreqMap[T](val input: FreqMap[T]) extends RichColl[T, FreqMap[T], FreqMap[FreqMap[T]]] {
+    val totalItems: Int = input.values.sum
+
+    def removeItems(quantity: Int): (FreqMap[T], FreqMap[T]) = {
+      val (item, availableQuantity) = input.head
+      val surplus = availableQuantity - quantity
+
+      if (surplus > 0) (Map(item -> quantity), input.updated(item, surplus))
+      else if (surplus == 0) (Map(item -> quantity), input.removed(item))
+      else {
+        val (extracted, remaining) = input.removed(item).removeItems(-surplus)
+        (extracted + (item -> availableQuantity), remaining)
+      }
+    }
+
+    override protected[binpacking] def itemsBySize(sizer: T => Int): Census[T] = input.groupBy(x => sizer(x._1))
+    
+    override protected[binpacking] def outputFor(r: Packing, ibs: Map[Int, FreqMap[T]]): FreqMap[FreqMap[T]] = ???
+  }
 
   object FreqMap {
     def apply[A](s: Seq[A]): FreqMap[A] = s.groupMapReduce(identity)(_ => 1)(_ + _)
@@ -15,7 +128,7 @@ object BinPacking {
   type BinContents = FreqMap[Int]
   implicit class RichBinContents(m: BinContents) {
     val totalSize: Int = m.map(x => x._1 * x._2).sum
-    def multipliedBy(multiplier: Int): FreqMap[Int] = m.view.mapValues(_ * multiplier).toMap
+    def multipliedBy(multiplier: Int): FreqMap[Int] = m.mapV(_ * multiplier)
   }
 
   type Packing = FreqMap[BinContents]
@@ -45,6 +158,20 @@ object BinPacking {
   object ActiveBin {
     trait Selector {
       def select(item: Int): collection.Seq[ActiveBin] => Option[ActiveBin]
+
+      def packOnline(binCapacity: Int, items: Iterator[Int]): Packing = {
+        val bins = mutable.Queue.empty[ActiveBin]
+        items.foreach { item =>
+          select(item)(bins).fold {
+            bins.append(ActiveBin.newBinContaining(binCapacity, item))
+            ()
+          } { _.addIfFits(item) }
+        }
+        FreqMap(bins.toSeq.map(_.toMap))
+      }
+
+      val Decreasing: OfflineAlgorithm = (binCapacity: Int, itemQuantities: FreqMap[Int]) =>
+        packOnline(binCapacity, itemsInDecreasingSizeFrom(itemQuantities))
     }
 
     object Selector {
@@ -88,4 +215,5 @@ object BinPacking {
     SortedMap.from(itemQuantities)(reverseIntOrdering).iterator.flatMap {
       case (item, quantity) => Iterator.fill(quantity)(item)
     }
+
 }
