@@ -1,7 +1,7 @@
 package com.madgag.algo.packing.binpacking
 
 import com.madgag.algo.packing.binpacking.BinPacking.ActiveBin.Selector.{BestFit, FirstFit}
-import com.madgag.algo.packing.binpacking.BinPacking.OfflineAlgorithm.{BFD, FFD}
+import com.madgag.algo.packing.binpacking.BinPacking.OfflineAlgorithm.FFD
 import com.madgag.algo.packing.binpacking.BinPacking._
 import org.scalacheck.Gen
 import org.scalatest.flatspec.AnyFlatSpec
@@ -46,7 +46,7 @@ class BinPackingTest extends AnyFlatSpec with should.Matchers with ScalaCheckPro
       val badPacking: Packing = BinPacking.pack(binCapacity, itemsFreqMap, FirstFit)
       packing.largestBinSize should be <= binCapacity
       packing.itemCounts shouldBe itemsFreqMap
-      val minimumRequiredBins = math.round(math.ceil(itemsFreqMap.totalSize.toFloat / binCapacity)).toInt
+      val minimumRequiredBins = math.round(math.ceil(itemsFreqMap.totalItemSize.toFloat / binCapacity)).toInt
 
       packing.numBins should be >= minimumRequiredBins
       val packingBins = packing.numBins
@@ -61,6 +61,12 @@ class BinPackingTest extends AnyFlatSpec with should.Matchers with ScalaCheckPro
       "Foo" -> 5,
       "Bar" -> 7
     ).itemsBySize(_.length) shouldBe Map(3 -> Map("Foo" -> 5, "Bar" -> 7))
+  }
+
+  it should "pack things, I guess" in {
+    val packer = Packer[String](Setup(binCapacity = 7, sizer = _.length), FFD)
+
+    Map("Foo" -> 3, "Bar" -> 2).packWith(packer).flattenFrequencies shouldBe Map("Foo" -> 3, "Bar" -> 2)
   }
 
 }

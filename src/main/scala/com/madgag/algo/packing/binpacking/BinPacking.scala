@@ -6,6 +6,9 @@ import com.madgag.scala.collection.decorators._
 
 import scala.collection.immutable.SortedMap
 import scala.collection.mutable
+import cats._
+import cats.data._
+import cats.syntax.all._
 
 /**
  * We want a way to track arbitary objects and ultimately assign them to a bin.
@@ -45,17 +48,30 @@ object BinPacking {
     def finishBin: Acc[T] = copy(finishedBins = finishedBins + currentBin, currentBin = Set.empty)
   }
 
-  implicit class RichSet[T](val input: Set[T]) extends RichColl[T, Set[T], Set[Set[T]]] {
+  case class AccFM[T](census: Census[T], finishedBins: FreqMap[FreqMap[T]], currentBin: FreqMap[T]) {
+//    val m: Monoid[T] = implicitly[Monoid[T]]
+//    val fm: Monoid[T] = implicitly[Monoid[T]]
+    def add(binContents: BinContents): AccFM[T] = binContents.foldLeft(this) {
+      case (acc, (item, quantity)) => acc.addToExistingBin(item, quantity)
+    }.finishBin
 
+    def addToExistingBin(itemSize: Int, quantity: Int): AccFM[T] = {
+      val (extracted, updatedCensus) = census.removeItems(itemSize, quantity)
+      copy(
+        census = updatedCensus,
+        currentBin = currentBin |+| extracted
+      )
+    }
+
+    def finishBin: AccFM[T] = copy(finishedBins = finishedBins |+| Map(currentBin -> 1), currentBin = Map.empty)
+  }
+
+  implicit class RichSet[T](val input: Set[T]) extends RichColl[T, Set[T], Set[Set[T]]] {
     override protected def itemsBySize(sizer: T => Int): Census[T] =
       input.groupUp(sizer)(_.map(_ -> 1).toMap)
 
     override protected def outputFor(packing: Packing, census: Census[T]): Set[Set[T]] =
-      (for {
-        (bc, repsOfBin) <- packing
-        _ <- 0 until repsOfBin
-      } yield bc).foldLeft(Acc[T](census, Set.empty, Set.empty))(_ add _).finishedBins
-
+      packing.bins.foldLeft(Acc[T](census, Set.empty, Set.empty))(_ add _).finishedBins
   }
 
   case class Setup[A](binCapacity: Int, sizer: A => Int) {
@@ -70,8 +86,6 @@ object BinPacking {
     val FFD: OfflineAlgorithm = FirstFit.Decreasing
     val BFD: OfflineAlgorithm = BestFit.Decreasing
   }
-
-
 
   case class Packer[A](setup: Setup[A], offlineAlgorithm: OfflineAlgorithm) {
 
@@ -117,8 +131,16 @@ object BinPacking {
     }
 
     override protected[binpacking] def itemsBySize(sizer: T => Int): Census[T] = input.groupBy(x => sizer(x._1))
-    
-    override protected[binpacking] def outputFor(r: Packing, ibs: Map[Int, FreqMap[T]]): FreqMap[FreqMap[T]] = ???
+
+    override protected[binpacking] def outputFor(packing: Packing, census: Census[T]): FreqMap[FreqMap[T]] =
+      packing.bins.foldLeft(AccFM[T](census, Map.empty, Map.empty))(_ add _).finishedBins
+  }
+
+  implicit class RichFreqFreqMap[T](input: FreqMap[FreqMap[T]]) {
+    def flattenFrequencies: FreqMap[T] = (for {
+      (innerFreqMap, frequencyOfInnerMap) <- input.toSeq
+      (item, itemInnerFreq) <- innerFreqMap
+    } yield item -> (itemInnerFreq * frequencyOfInnerMap)).groupMapReduce(_._1)(_._2)(_ + _)
   }
 
   object FreqMap {
@@ -127,17 +149,23 @@ object BinPacking {
 
   type BinContents = FreqMap[Int]
   implicit class RichBinContents(m: BinContents) {
-    val totalSize: Int = m.map(x => x._1 * x._2).sum
+    val totalItemSize: Int = m.map(x => x._1 * x._2).sum
     def multipliedBy(multiplier: Int): FreqMap[Int] = m.mapV(_ * multiplier)
   }
 
   type Packing = FreqMap[BinContents]
 
-  implicit class RichPacking(m: Packing) {
-    val numBins: Int = m.map(x => x._1.size * x._2).sum
-    val totalSize: Int = m.map(x => x._1.totalSize * x._2).sum
-    val largestBinSize: Int = m.keys.map(_.totalSize).max
-    val itemCounts: FreqMap[Int] = m.toSeq.flatMap(x => x._1.multipliedBy(x._2).toSeq).groupMapReduce(_._1)(_._2)(_ + _)
+  implicit class RichPacking(p: Packing) {
+    //val flattened: FreqMap[Int] = p.flattenFrequencies
+    val numBins: Int = p.map(x => x._1.size * x._2).sum
+    val totalItemSize: Int = p.map(x => x._1.totalItemSize * x._2).sum
+    val largestBinSize: Int = p.keys.map(_.totalItemSize).max
+    val itemCounts: FreqMap[Int] = p.flattenFrequencies
+
+    val bins: Iterable[BinContents] = for {
+      (bc, repsOfBin) <- p
+      _ <- 0 until repsOfBin
+    } yield bc
   }
 
   val reverseIntOrdering: Ordering[Int] = implicitly[Ordering[Int]].reverse
