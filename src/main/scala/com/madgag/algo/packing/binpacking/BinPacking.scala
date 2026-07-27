@@ -1,14 +1,13 @@
 package com.madgag.algo.packing.binpacking
 
+import cats.Monoid
+import cats.syntax.all._
 import com.madgag.algo.packing.binpacking.BinPacking.ActiveBin.Selector
 import com.madgag.algo.packing.binpacking.BinPacking.ActiveBin.Selector.{BestFit, FirstFit}
 import com.madgag.scala.collection.decorators._
 
 import scala.collection.immutable.SortedMap
 import scala.collection.mutable
-import cats._
-import cats.data._
-import cats.syntax.all._
 
 /**
  * We want a way to track arbitary objects and ultimately assign them to a bin.
@@ -19,59 +18,61 @@ import cats.syntax.all._
  */
 object BinPacking {
 
-  trait RichColl[T, I, O] {
-    val input: I
+  abstract class RichColl[T, B[_]: Woof](implicit mb: Monoid[B[T]], mbb: Monoid[B[B[T]]]) {
+    val input: B[T]
 
-    def packWith(packer: Packer[T]): O = {
+    def packWith(packer: Packer[T]): B[B[T]] = {
       val census = itemsBySize(packer.setup.sizer)
       val packing: Packing = packer.pack(census.mapV(_.totalItems))
-      outputFor(packing, census)
+      packing.bins.foldLeft(Acc[T, B](census, mbb.empty, mb.empty))(_ add _).finishedBins
     }
 
-    protected def itemsBySize(sizer: T => Int): Census[T]
-    protected def outputFor(packing: Packing, census: Census[T]): O
+    protected[binpacking] def itemsBySize(sizer: T => Int): Census[T]
   }
 
-  case class Acc[T](census: Census[T], finishedBins: Set[Set[T]], currentBin: Set[T]) {
-    def add(binContents: BinContents): Acc[T] = binContents.foldLeft(this) {
+  trait Woof[B[_]] {
+    def addableToCurrentBin[T](extracted: FreqMap[T]): B[T]
+
+    def addableToFinishedBins[T](currentBin: B[T]): B[B[T]]
+  }
+
+  object Woof {
+    implicit case object WoofSet extends Woof[Set] {
+      override def addableToCurrentBin[T](extracted: FreqMap[T]): Set[T] = extracted.keySet
+
+      override def addableToFinishedBins[T](currentBin: Set[T]): Set[Set[T]] = Set(currentBin)
+    }
+
+    implicit case object WoofFreqMap extends Woof[FreqMap] {
+      override def addableToCurrentBin[T](extracted: FreqMap[T]): FreqMap[T] = extracted
+
+      override def addableToFinishedBins[T](currentBin: FreqMap[T]): FreqMap[FreqMap[T]] = Map(currentBin -> 1)
+    }
+  }
+
+
+
+  case class Acc[T, B[_] : Woof](census: Census[T], finishedBins: B[B[T]], currentBin: B[T])(
+    implicit mb: Monoid[B[T]], mbb: Monoid[B[B[T]]]
+  ) {
+    def add(binContents: BinContents): Acc[T, B] = binContents.foldLeft(this) {
       case (acc, (item, quantity)) => acc.addToExistingBin(item, quantity)
     }.finishBin
 
-    def addToExistingBin(itemSize: Int, quantity: Int): Acc[T] = {
+    def addToExistingBin(itemSize: Int, quantity: Int): Acc[T, B] = {
       val (extracted, updatedCensus) = census.removeItems(itemSize, quantity)
       copy(
         census = updatedCensus,
-        currentBin = currentBin ++ extracted.keySet // we expect no repeats for Set
+        currentBin = currentBin |+| implicitly[Woof[B]].addableToCurrentBin(extracted)
       )
     }
 
-    def finishBin: Acc[T] = copy(finishedBins = finishedBins + currentBin, currentBin = Set.empty)
+    def finishBin: Acc[T, B] = copy(finishedBins = finishedBins |+| implicitly[Woof[B]].addableToFinishedBins(currentBin), currentBin = mb.empty)
   }
 
-  case class AccFM[T](census: Census[T], finishedBins: FreqMap[FreqMap[T]], currentBin: FreqMap[T]) {
-//    val m: Monoid[T] = implicitly[Monoid[T]]
-//    val fm: Monoid[T] = implicitly[Monoid[T]]
-    def add(binContents: BinContents): AccFM[T] = binContents.foldLeft(this) {
-      case (acc, (item, quantity)) => acc.addToExistingBin(item, quantity)
-    }.finishBin
-
-    def addToExistingBin(itemSize: Int, quantity: Int): AccFM[T] = {
-      val (extracted, updatedCensus) = census.removeItems(itemSize, quantity)
-      copy(
-        census = updatedCensus,
-        currentBin = currentBin |+| extracted
-      )
-    }
-
-    def finishBin: AccFM[T] = copy(finishedBins = finishedBins |+| Map(currentBin -> 1), currentBin = Map.empty)
-  }
-
-  implicit class RichSet[T](val input: Set[T]) extends RichColl[T, Set[T], Set[Set[T]]] {
-    override protected def itemsBySize(sizer: T => Int): Census[T] =
+  implicit class RichSet[T](val input: Set[T]) extends RichColl[T, Set] {
+    override protected[binpacking] def itemsBySize(sizer: T => Int): Census[T] =
       input.groupUp(sizer)(_.map(_ -> 1).toMap)
-
-    override protected def outputFor(packing: Packing, census: Census[T]): Set[Set[T]] =
-      packing.bins.foldLeft(Acc[T](census, Set.empty, Set.empty))(_ add _).finishedBins
   }
 
   case class Setup[A](binCapacity: Int, sizer: A => Int) {
@@ -115,7 +116,7 @@ object BinPacking {
 
   type FreqMap[A] = Map[A, Int]
 
-  implicit class RichFreqMap[T](val input: FreqMap[T]) extends RichColl[T, FreqMap[T], FreqMap[FreqMap[T]]] {
+  implicit class RichFreqMap[T](val input: FreqMap[T]) extends RichColl[T, FreqMap] {
     val totalItems: Int = input.values.sum
 
     def removeItems(quantity: Int): (FreqMap[T], FreqMap[T]) = {
@@ -131,9 +132,6 @@ object BinPacking {
     }
 
     override protected[binpacking] def itemsBySize(sizer: T => Int): Census[T] = input.groupBy(x => sizer(x._1))
-
-    override protected[binpacking] def outputFor(packing: Packing, census: Census[T]): FreqMap[FreqMap[T]] =
-      packing.bins.foldLeft(AccFM[T](census, Map.empty, Map.empty))(_ add _).finishedBins
   }
 
   implicit class RichFreqFreqMap[T](input: FreqMap[FreqMap[T]]) {
