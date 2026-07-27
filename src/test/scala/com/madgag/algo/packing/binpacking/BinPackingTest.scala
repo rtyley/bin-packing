@@ -57,10 +57,8 @@ class BinPackingTest extends AnyFlatSpec with should.Matchers with ScalaCheckPro
   }
 
   "RichFreqMap" should "correctly group items by size" in {
-    Map(
-      "Foo" -> 5,
-      "Bar" -> 7
-    ).itemsBySize(_.length) shouldBe Map(3 -> Map("Foo" -> 5, "Bar" -> 7))
+    val collectionAdapter = CollectionAdapter.caFreqMap[String]
+    collectionAdapter.censusFor(Map("Foo" -> 5, "Bar" -> 7), _.length) shouldBe Map(3 -> Map("Foo" -> 5, "Bar" -> 7))
   }
 
   it should "pack things, I guess" in {
