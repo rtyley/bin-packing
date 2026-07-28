@@ -5,6 +5,10 @@ organization := "com.madgag"
 licenses := Seq(License.Apache2)
 
 scalaVersion := "2.13.18"
+crossScalaVersions := Seq(
+  scalaVersion.value,
+  "3.3.8"
+)
 
 scalacOptions := Seq("-deprecation", "-release:21")
 
