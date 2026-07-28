@@ -18,7 +18,7 @@ libraryDependencies ++= Seq(
   "org.scalatestplus" %% "scalacheck-1-18" % "3.2.19.0" % Test
 )
 
-releaseVersion := ReleaseVersion.fromAssessedCompatibilityWithLatestRelease().value
+// releaseVersion := ReleaseVersion.fromAssessedCompatibilityWithLatestRelease().value
 releaseProcess := Seq[ReleaseStep](
   checkSnapshotDependencies,
   inquireVersions,
