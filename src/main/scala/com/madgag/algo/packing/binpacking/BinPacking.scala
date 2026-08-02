@@ -19,15 +19,6 @@ import scala.collection.mutable
  */
 object BinPacking {
 
-  abstract class RichColl[T, B[_]](implicit ca: CollectionAdapter[T, B]) {
-    val input: B[T]
-
-    def packWith(packer: Packer[T]): B[B[T]] = {
-      val census = ca.censusFor(input, packer.setup.sizer)
-      packer.pack(census.itemQuantities).bins.foldLeft(ca.accFor(census))(_ add _).finishedBins
-    }
-  }
-
   abstract class CollectionAdapter[T, B[_]](implicit val mb: Monoid[B[T]], val mbb: Monoid[B[B[T]]] ) {
     val emptyBin: B[T] = mb.empty
 
@@ -80,25 +71,6 @@ object BinPacking {
     }
   }
 
-  case class Setup[A](binCapacity: Int, sizer: A => Int) {
-    def using(offlineAlgorithm: OfflineAlgorithm) = Packer(this, offlineAlgorithm)
-  }
-
-  trait OfflineAlgorithm {
-    def pack(binCapacity: Int, itemQuantities: FreqMap[Int]): Packing
-  }
-
-  object OfflineAlgorithm {
-    val FFD: OfflineAlgorithm = FirstFit.Decreasing
-    val BFD: OfflineAlgorithm = BestFit.Decreasing
-  }
-
-  case class Packer[A](setup: Setup[A], offlineAlgorithm: OfflineAlgorithm) {
-
-    def pack(bareItemFrequenciesBySize: FreqMap[Int]): Packing =
-      offlineAlgorithm.pack(setup.binCapacity, bareItemFrequenciesBySize)
-  }
-
   type Census[A] = Map[Int, FreqMap[A]]
 
   object Census {
@@ -114,11 +86,9 @@ object BinPacking {
     def itemQuantities: FreqMap[Int] = census.mapV(_.totalItems)
   }
 
-  implicit class RichSet[T](val input: Set[T]) extends RichColl[T, Set]
-
   type FreqMap[A] = Map[A, Int]
 
-  implicit class RichFreqMap[T](val input: FreqMap[T]) extends RichColl[T, FreqMap] {
+  implicit class RichFreqMap[T](val input: FreqMap[T]) {
     val totalItems: Int = input.values.sum
 
     def removeItems(quantity: Int): (FreqMap[T], FreqMap[T]) = {
@@ -155,7 +125,7 @@ object BinPacking {
   implicit class RichPacking(p: Packing) {
     val numBins: Int = p.map(x => x._1.size * x._2).sum
     val totalItemSize: Int = p.map(x => x._1.totalItemSize * x._2).sum
-    val largestBinSize: Int = p.keys.map(_.totalItemSize).max
+    val largestBinSize: Int = if (p.isEmpty) 0 else p.keys.map(_.totalItemSize).max
     val itemCounts: FreqMap[Int] = p.flattenFrequencies
 
     val bins: Iterable[BinContents] = for {

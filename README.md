@@ -4,6 +4,12 @@ _packing items into bins of fixed sizes, minimising the number of bins used_
 
 https://en.wikipedia.org/wiki/Bin_packing_problem
 
+```scala
+val packer: Packer[String] = Packer(Setup(binCapacity = 5, sizer = _.length), FFD)
+
+val packed: Set[Set[String]] = Set("My", "Boom", "Bar", "A").packWith(packer)
+// Set(Set("A", "Boom"), Set("My", "Bar"))
+```
 
 ## See also
 

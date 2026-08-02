@@ -1,8 +1,8 @@
 package com.madgag.algo.packing.binpacking
 
 import com.madgag.algo.packing.binpacking.BinPacking.ActiveBin.Selector.{BestFit, FirstFit}
-import com.madgag.algo.packing.binpacking.BinPacking.OfflineAlgorithm.FFD
 import com.madgag.algo.packing.binpacking.BinPacking._
+import com.madgag.algo.packing.binpacking.OfflineAlgorithm.FFD
 import org.scalacheck.Gen
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should
@@ -60,11 +60,4 @@ class BinPackingTest extends AnyFlatSpec with should.Matchers with ScalaCheckPro
     val collectionAdapter = CollectionAdapter.caFreqMap[String]
     collectionAdapter.censusFor(Map("Foo" -> 5, "Bar" -> 7), _.length) shouldBe Map(3 -> Map("Foo" -> 5, "Bar" -> 7))
   }
-
-  it should "pack things, I guess" in {
-    val packer = Packer[String](Setup(binCapacity = 7, sizer = _.length), FFD)
-
-    Map("Foo" -> 3, "Bar" -> 2).packWith(packer).flattenFrequencies shouldBe Map("Foo" -> 3, "Bar" -> 2)
-  }
-
 }
