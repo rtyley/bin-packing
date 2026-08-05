@@ -13,10 +13,14 @@ val packed: Set[Set[String]] = Set("My", "Boom", "Bar", "A").packWith(packer)
 
 ## See also
 
-* https://research.fdabrandao.pt/papers/cspheuristics.pdf on the cutting stock problem (CSP)
+Interesting Papers (I haven't implemented these, at least yet)
+
+* [_"Fast Pattern-based Algorithms for Cutting Stock"_](https://research.fdabrandao.pt/papers/cspheuristics.pdf) (2013) on the cutting stock problem (CSP)
   and bin packing problem (BPP).
-* Other interesting algorithms:
-  * https://github.com/rtyley/k-way-merge
+* [_"Solving Bin Packing Related Problems Using an Arc Flow Formulation"_](https://optimization-online.org/wp-content/uploads/2012/04/3433.pdf) (2012) looks at cardinality-constrained bin packing.
+
+Other interesting algorithms:
+* https://github.com/rtyley/k-way-merge
 
 ## Alternative libraries
 
