@@ -28,3 +28,6 @@ Google's [OR-Tools](https://github.com/google/or-tools) is an open source softwa
 for optimization, [written in C++](https://developers.google.com/optimization/introduction/get_started),
 but with a [Java wrapper](https://developers.google.com/optimization/introduction/java),
 including [support for bin-packing](https://developers.google.com/optimization/pack/bin_packing#java).
+
+* https://github.com/optimatika/ojAlgo - pure Java MIP
+* https://github.com/vagmcs/Optimus - Scala, can use ojAlgo or other solvers
