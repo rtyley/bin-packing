@@ -1,17 +1,21 @@
 package com.madgag.algo.packing.binpacking
 
+import com.madgag.algo.packing.binpacking.BinPacking.Size.CardinalityConstrained
 import com.madgag.algo.packing.binpacking.BinPacking._
 import com.madgag.algo.packing.binpacking.OfflineAlgorithm.FFD
 import org.scalacheck.Gen
+import org.scalatest.Inspectors
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
 class RichCollectionTest extends AnyFlatSpec with Matchers with ScalaCheckPropertyChecks {
-  val packer: Packer[String] = Packer(Setup(binCapacity = 5, sizer = _.length), FFD)
+  val packer: Packer[String, Int] = Packer(Setup(binSize = 5, sizer = _.length), FFD)
+  val ccPacker: Packer[String, CardinalityConstrained] =
+    Packer(Setup(binSize = CardinalityConstrained(size = 5, cardinality = 3), sizer = str => CardinalityConstrained.item(size = str.length)), FFD)
 
   val itemsThatCanFitInBinGen: Gen[String] =
-    Gen.choose(0, packer.setup.binCapacity).flatMap(size => Gen.stringOfN(size, Gen.alphaLowerChar))
+    Gen.choose(0, packer.setup.binSize).flatMap(size => Gen.stringOfN(size, Gen.alphaLowerChar))
 
   val itemSetsGen: Gen[Set[String]] = Gen.containerOf[Set, String](itemsThatCanFitInBinGen)
 
@@ -22,7 +26,26 @@ class RichCollectionTest extends AnyFlatSpec with Matchers with ScalaCheckProper
   it should "work for many test samples" in forAll (itemSetsGen) { items =>
     val packedSets: Set[Set[String]] = items.packWith(packer)
     packedSets.flatten shouldBe items
-    packedSets.forall(_.toSeq.map(_.length).sum <= packer.setup.binCapacity)
+    Inspectors.forAll(packedSets) { _.toSeq.map(_.length).sum should be <= packer.setup.binSize }
+  }
+
+  "Packing Sets while also respecting cardinality constraints" should "work" in {
+    Set("A", "B", "C", "D").packWith(ccPacker).size shouldBe 2
+  }
+
+  it should "for a single item that is the size of the bin" in {
+    Set("ABCDE").packWith(ccPacker) shouldBe Set(Set("ABCDE"))
+  }
+
+  it should "work for many test samples" in forAll (itemSetsGen) { items =>
+    val packedSets: Set[Set[String]] = items.packWith(ccPacker)
+    packedSets.flatten shouldBe items
+
+    val binSize = ccPacker.setup.binSize
+    Inspectors.forAll(packedSets) { set =>
+      set.toSeq.map(_.length).sum should be <= binSize.size
+      set.size should be <= binSize.cardinality
+    }
   }
 
   "FreqMap" should "have a nice 'packWith' syntax" in {
@@ -36,8 +59,11 @@ class RichCollectionTest extends AnyFlatSpec with Matchers with ScalaCheckProper
   } yield item -> quant)
 
   it should "work for many test samples" in forAll (itemFreqMapsGen) { items: FreqMap[String] =>
-    val packedSets: FreqMap[FreqMap[String]] = items.packWith(packer)
-    packedSets.flattenFrequencies shouldBe items
-    packedSets.forall(_._1.map(x => x._1.length * x._2).sum <= packer.setup.binCapacity)
+    val packedBags: FreqMap[FreqMap[String]] = items.packWith(packer)
+    packedBags.flattenFrequencies shouldBe items
+
+    Inspectors.forAll(packedBags) { case (bag, _) =>
+      bag.map(x => x._1.length * x._2).sum should be <= packer.setup.binSize
+    }
   }
 }
