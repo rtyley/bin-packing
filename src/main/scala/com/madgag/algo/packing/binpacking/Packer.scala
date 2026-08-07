@@ -2,8 +2,8 @@ package com.madgag.algo.packing.binpacking
 
 import com.madgag.algo.packing.binpacking.BinPacking.{FreqMap, Packing}
 
-case class Setup[A](binCapacity: Int, sizer: A => Int) {
-  def using(offlineAlgorithm: OfflineAlgorithm) = Packer(this, offlineAlgorithm)
+case class Setup[A, S](binSize: S, sizer: A => S) {
+  def using(offlineAlgorithm: OfflineAlgorithm[S]) = Packer(this, offlineAlgorithm)
 }
 
 /**
@@ -15,7 +15,7 @@ case class Setup[A](binCapacity: Int, sizer: A => Int) {
  * that can be sized to integers - you can use the collection support provided by
  * [[RichCollection]].
  */
-case class Packer[A](setup: Setup[A], offlineAlgorithm: OfflineAlgorithm) {
-  def pack(bareItemFrequenciesBySize: FreqMap[Int]): Packing =
-    offlineAlgorithm.pack(setup.binCapacity, bareItemFrequenciesBySize)
+case class Packer[A, S](setup: Setup[A, S], offlineAlgorithm: OfflineAlgorithm[S]) {
+  def pack(bareItemFrequenciesBySize: FreqMap[S]): Packing[S] =
+    offlineAlgorithm.pack(setup.binSize, bareItemFrequenciesBySize)
 }
