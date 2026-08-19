@@ -2,12 +2,14 @@ package com.madgag.algo.packing.binpacking
 
 
 import cats.syntax.all._
-import cats.{Group, Monoid, Order}
+import cats.{Group, Order}
 import com.madgag.algo.packing.binpacking.BinPacking.ActiveBin.Selector
 import com.madgag.algo.packing.binpacking.BinPacking.ActiveBin.Selector.BinSelector
-import com.madgag.algo.packing.binpacking.BinPacking.CollectionAdapter.Acc
 import com.madgag.algo.packing.binpacking.BinPacking.Size._
 import com.madgag.scala.collection.decorators._
+import spire.algebra.{CoordinateSpace, Field}
+import spire.implicits.coordinateSpaceOps
+import com.madgag.algo.packing.binpacking.BinPacking.CanFit._
 
 import scala.collection.immutable.SortedMap
 import scala.collection.mutable
@@ -29,6 +31,10 @@ object BinPacking {
     implicit def deriveCanFit[T: Order]: CanFit[T] = new CanFit[T] {
       override def canFit(itemSize: T, binSize: T): Boolean = itemSize <= binSize
     }
+
+    implicit class CanFitOps[T](val a: T)(implicit CF: CanFit[T]) {
+      def canFit(item: T): Boolean = CF.canFit(item, a)
+    }
   }
 
 
@@ -36,29 +42,55 @@ object BinPacking {
 
   object Size {
 
-    case class CardinalityConstrained(size: Int, cardinality: Int)
+    case class CardinalityConstrained(size: Double, cardinality: Double)
     object CardinalityConstrained {
       def item(size: Int) = CardinalityConstrained(size, cardinality = 1)
 
-      val group: Group[CardinalityConstrained] = new Group[CardinalityConstrained] {
-        override def inverse(a: CardinalityConstrained): CardinalityConstrained = CardinalityConstrained(-a.size, -a.cardinality)
-        override def empty: CardinalityConstrained = CardinalityConstrained(0,0)
-        override def combine(x: CardinalityConstrained, y: CardinalityConstrained): CardinalityConstrained =
-          CardinalityConstrained(x.size + y.size, x.cardinality + y.cardinality)
+      implicit val coordSpace: CoordinateSpace[CardinalityConstrained, Double] = new CoordinateSpace[CardinalityConstrained, Double] {
+
+        private val axes = Seq(CardinalityConstrained(1, 0),CardinalityConstrained(0, 1))
+
+        override def dimensions: Int = 2
+
+        override def coord(v: CardinalityConstrained, i: Int): Double = i match {
+          case 0 => v.size
+          case 1 => v.cardinality
+        }
+
+        override def axis(i: Int): CardinalityConstrained = axes(i)
+
+        override implicit def scalar: Field[Double] = spire.implicits.DoubleAlgebra
+
+        override def timesl(r: Double, v: CardinalityConstrained): CardinalityConstrained =
+          CardinalityConstrained(r * v.size, r * v.cardinality)
+
+        override def negate(x: CardinalityConstrained): CardinalityConstrained =
+          CardinalityConstrained(-x.size, -x.cardinality)
+
+        override val zero: CardinalityConstrained = CardinalityConstrained(0,0)
+
+        override def plus(x: CardinalityConstrained, y: CardinalityConstrained): CardinalityConstrained = CardinalityConstrained(
+          x.size + y.size,
+          x.cardinality + y.cardinality
+        )
       }
+
+      implicit val size: Size[CardinalityConstrained] = deriveSizeFromCoordinateSpace[CardinalityConstrained, Double]
 
       val canFit: CanFit[CardinalityConstrained] = new CanFit[CardinalityConstrained] {
         override def canFit(itemSize: CardinalityConstrained, binSize: CardinalityConstrained): Boolean =
           itemSize.size <= binSize.size && itemSize.cardinality <= binSize.cardinality
       }
-
-      implicit val size: Size[CardinalityConstrained] = deriveSize(group, canFit)
-
-      implicit val order: Order[CardinalityConstrained] =
-        Order.by(x => x.size.toLong * x.cardinality) // choice of this will affect behaviour of Best-Fit... what is optimal?!
     }
 
     def apply[T](implicit ev: Size[T]): Size[T] = ev
+
+
+    implicit def deriveSizeFromCoordinateSpace[V, F: Order](implicit cs: CoordinateSpace[V, F]): Size[V] =
+      deriveSize(
+        g = cs.additive,
+        (itemSize: V, binSize: V) => (0 until cs.dimensions).forall(i => itemSize.coord(i) <= binSize.coord(i))
+      )
 
     implicit def deriveSize[T](implicit g: Group[T], cf: CanFit[T]): Size[T] = new Size[T] {
       override def empty: T = g.empty
@@ -73,61 +105,6 @@ object BinPacking {
         if (n == 0) S.empty
         else if (n > 0) S.combineN(a, n)
         else S.inverse(S.combineN(a, -n))
-
-      def canFit(item: T): Boolean = S.canFit(item, a)
-    }
-  }
-
-
-  abstract class CollectionAdapter[T, B[_]](implicit val mb: Monoid[B[T]], val mbb: Monoid[B[B[T]]] ) {
-    val emptyBin: B[T] = mb.empty
-
-    def accFor[S: Size](census: Census[T, S]): Acc[T, S, B] = Acc(census, mbb.empty, emptyBin, this)
-    def censusFor[S](input: B[T], sizer: T => S): Census[T, S]
-    def addableToCurrentBin(extracted: FreqMap[T]): B[T]
-    def addableToFinishedBins(currentBin: B[T]): B[B[T]]
-  }
-
-  object CollectionAdapter {
-    /**
-     * For packing when you don't want to repeat any items, which would be normal
-     * when you're making API calls about many ids -  no point in asking about the
-     * same item twice.
-     */
-    implicit def caSet[T]: CollectionAdapter[T, Set] = new CollectionAdapter[T, Set] {
-      def censusFor[S](input: Set[T], sizer: T => S): Census[T, S] = input.groupUp(sizer)(_.map(_ -> 1).toMap)
-      def addableToCurrentBin(extracted: FreqMap[T]): Set[T] = extracted.keySet
-      def addableToFinishedBins(currentBin: Set[T]): Set[Set[T]] = Set(currentBin)
-    }
-
-    implicit def caFreqMap[T]: CollectionAdapter[T, FreqMap] = new CollectionAdapter[T, FreqMap] {
-      def censusFor[S](input: FreqMap[T], sizer: T => S): Census[T, S] = input.groupBy(x => sizer(x._1))
-      def addableToCurrentBin(extracted: FreqMap[T]): FreqMap[T] = extracted
-      def addableToFinishedBins(currentBin: FreqMap[T]): FreqMap[FreqMap[T]] = Map(currentBin -> 1)
-    }
-
-    case class Acc[T, S : Size, B[_]](
-      census: Census[T, S],
-      finishedBins: B[B[T]],
-      currentBin: B[T],
-      collectionAdapter: CollectionAdapter[T, B]
-    ) {
-      import collectionAdapter._
-
-      def add(binContents: BinContents[S]): Acc[T, S, B] = binContents.foldLeft(this) {
-        case (acc, (item, quantity)) => acc.addToExistingBin(item, quantity)
-      }.finishBin
-
-      def addToExistingBin(itemSize: S, quantity: Int): Acc[T, S, B] = {
-        val (extracted, updatedCensus) = census.removeItems(itemSize, quantity)
-        copy(
-          census = updatedCensus,
-          currentBin = currentBin |+| addableToCurrentBin(extracted)
-        )
-      }
-
-      def finishBin: Acc[T, S, B] =
-        copy(finishedBins = finishedBins |+| addableToFinishedBins(currentBin), currentBin = emptyBin)
     }
   }
 
@@ -150,6 +127,15 @@ object BinPacking {
 
   implicit class RichFreqMap[T](val input: FreqMap[T]) {
     val totalItems: Int = input.values.sum
+
+    def addOne(item: T): FreqMap[T] =
+      input.updatedWith(item)(existingValueOpt => Some(existingValueOpt.getOrElse(0) + 1))
+
+    def removeOne(item: T): FreqMap[T] = {
+      val remaining = input(item) - 1
+      require(remaining >= 0)
+      if (remaining == 0) input.removed(item) else input.updated(item, remaining)
+    }
 
     def removeItems(quantity: Int): (FreqMap[T], FreqMap[T]) = {
       val (item, availableQuantity) = input.head
@@ -183,17 +169,20 @@ object BinPacking {
 
   type Packing[S] = FreqMap[BinContents[S]]
 
-  implicit class RichPacking[S](p: Packing[S])(implicit S: Size[S]) {
+  implicit class RichPacking[S](p: Packing[S]) {
     val numBins: Int = p.values.sum
-    val totalItemSize: S = p.map(x => x._1.totalItemSize * x._2).toSeq.combineAll
-    def largestBinSizeBy[T: Order](f: S => T): Option[T] =
-      p.keys.map(bin=> f(bin.totalItemSize)).maxOption(Order[T].toOrdering)
     val itemCounts: FreqMap[S] = p.flattenFrequencies
 
     val bins: Iterable[BinContents[S]] = for {
       (bc, repsOfBin) <- p
       _ <- 0 until repsOfBin
     } yield bc
+  }
+
+  implicit class RichSizePacking[S](p: Packing[S])(implicit S: Size[S]) {
+    val totalItemSize: S = p.map(x => x._1.totalItemSize * x._2).toSeq.combineAll
+    def largestBinSizeBy[T: Order](f: S => T): Option[T] =
+      p.keys.map(bin=> f(bin.totalItemSize)).maxOption(Order[T].toOrdering)
   }
 
   class ActiveBin[S: Size](var remainingCapacity: S, contents: mutable.HashMap[S, Int]) {
@@ -212,10 +201,10 @@ object BinPacking {
   }
 
   object ActiveBin {
-    abstract class Selector[S: Size] {
+    abstract class Selector[S] {
       def select(item: S): BinSelector[S]
 
-      def packOnline(binSize: S, items: Iterator[S]): Packing[S] = {
+      def packOnline(binSize: S, items: Iterator[S])(implicit S: Size[S]): Packing[S] = {
         val bins = mutable.Queue.empty[ActiveBin[S]]
         items.foreach { item =>
           select(item)(bins).fold {
@@ -226,7 +215,7 @@ object BinPacking {
         FreqMap(bins.toSeq.map(_.toMap))
       }
 
-      def decreasing(implicit o: Order[S]): OfflineAlgorithm[S] = new OfflineAlgorithm[S] {
+      def decreasing(implicit o: Order[S], S: Size[S]): OfflineAlgorithm[S] = new OfflineAlgorithm[S] {
         override def pack(binSize: S, itemQuantities: FreqMap[S]): Packing[S] =
           packOnline(binSize, itemsInDecreasingSizeFrom(itemQuantities))
       }
@@ -238,14 +227,14 @@ object BinPacking {
       /**
        * [[https://en.wikipedia.org/wiki/First-fit_bin_packing]]
        */
-      def firstFit[S: Size]: Selector[S] = new Selector {
+      def firstFit[S: CanFit]: Selector[S] = new Selector[S] {
         override def select(item: S): BinSelector[S] = _.find(_.canFit(item))
       }
 
       /**
        * [[https://en.wikipedia.org/wiki/Best-fit_bin_packing]]
        */
-      def bestFit[S: Size: Order]: Selector[S] = new Selector {
+      def bestFit[S: CanFit: Order]: Selector[S] = new Selector[S] {
         override def select(item: S): BinSelector[S] =
           _.filter(_.canFit(item)).minByOption(_.remainingCapacity)(Order[S].toOrdering)
       }

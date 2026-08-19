@@ -19,11 +19,19 @@ Interesting Papers (I haven't implemented these, at least yet)
   (2013) on the cutting stock problem (CSP) and bin packing problem (BPP).
 * [_"Solving Bin Packing Related Problems Using an Arc Flow Formulation"_](https://optimization-online.org/wp-content/uploads/2012/04/3433.pdf)
   (2012) looks at cardinality-constrained bin packing (CCBP).
+
+### Vector Bin Packing
+
+VBP is applicable to cardinality-constrained bin packing (CCBP), where we treat
+the cardinality of bins & items as the 2nd dimension of the vector being packed.
+
 * [_"Heuristics for Vector Bin Packing"_](https://www.microsoft.com/en-us/research/wp-content/uploads/2011/01/VBPackingESA11.pdf)
-  (2011) is applicable to CCBP, where we treat the cardinality of bins & items as the
-  2nd dimension of the vector being packed. Discusses the `DotProduct` heuristic which
+  (2011) Discusses the `DotProduct` heuristic which
   defines the 'largest' item as the one that maximises the dot product between the vector
   of remaining capacities and the vector of demands for the item.
+* [_"Classification and evaluation of the algorithms for vector bin packing"_](https://www.sciencedirect.com/science/article/pii/S0305054824003320)
+  (2025) introduces the multi-bin activation approach to overcome the myopic nature of
+  item-centric and bin-centric heuristics.
 
 Other algorithms I happen to have created implementations of:
 * https://github.com/rtyley/k-way-merge

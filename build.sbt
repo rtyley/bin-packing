@@ -18,6 +18,7 @@ Test / testOptions +=
 libraryDependencies ++= Seq(
   "com.madgag" %% "scala-collection-plus" % "1.0.0",
   "org.typelevel" %% "cats-core" % "2.13.0",
+  "org.typelevel" %% "spire" % "0.18.0",
   "org.scalatest" %% "scalatest" % "3.2.20" % Test,
   "org.scalatestplus" %% "scalacheck-1-18" % "3.2.19.0" % Test
 )
