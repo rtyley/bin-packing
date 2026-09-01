@@ -143,7 +143,7 @@ object BinPacking {
       (extracted, if (remaining.isEmpty) census.removed(itemSize) else census.updated(itemSize, remaining))
     }
 
-    def sizeFrequencies: FreqMap[S] = census.view.mapValues(_.totalItems).toMap
+    def sizeFrequencies: FreqMap[S] = census.toMap.mapV(_.totalItems)
   }
 
   type FreqMap[A] = Map[A, Int]

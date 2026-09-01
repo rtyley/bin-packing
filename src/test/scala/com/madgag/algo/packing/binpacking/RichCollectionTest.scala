@@ -58,7 +58,7 @@ class RichCollectionTest extends AnyFlatSpec with Matchers with ScalaCheckProper
     quant <- Gen.choose(1, 10)
   } yield item -> quant)
 
-  it should "work for many test samples" in forAll (itemFreqMapsGen) { items: FreqMap[String] =>
+  it should "work for many test samples" in forAll (itemFreqMapsGen) { (items: FreqMap[String]) =>
     val packedBags: FreqMap[FreqMap[String]] = items.packWith(packer)
     packedBags.flattenFrequencies shouldBe items
 
